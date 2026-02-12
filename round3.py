@@ -1398,4 +1398,3 @@ if __name__ == "__main__":
     ide = OfflinePythonIDE()
     ide.show()
     sys.exit(app.exec_())
-
