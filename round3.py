@@ -120,7 +120,7 @@ class OfflinePythonIDE(QWidget):
 
     # Template codes for each program (prog1..prog15)
     PROGRAM_TEMPLATES = {
-        "prog1": """# Program 1: Basic Input/Output and Arithmetic Operations
+        "prog1": """# Program 1
 def add(a, b):
     return a + b
 
