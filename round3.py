@@ -117,6 +117,7 @@ class KeyBlockerThread(QThread):
 class OfflinePythonIDE(QWidget):
     HARD_TIMEOUT_MS = 15 * 60 * 1000
     GROUP_TIMER_MS = 20 * 60 * 1000  # 20 minutes in milliseconds
+    GLOBAL_HALT_TIMER_MS = 20 * 60 * 1000  # 20 minutes global halt timer
 
     # Template codes for each program (prog1..prog15)
     PROGRAM_TEMPLATES = {
@@ -378,6 +379,12 @@ End"
         self.group_countdown_timer = QTimer(self)
         self.group_countdown_timer.timeout.connect(self._tick_group_timer)
 
+        # global halt timer variables (20 minutes exam halt timer)
+        self.halt_timer_started = False
+        self.halt_time_left_ms = 0
+        self.halt_countdown_timer = QTimer(self)
+        self.halt_countdown_timer.timeout.connect(self._tick_halt_timer)
+
         self.temp_file = None
         self.user_input = ""
         self.current_file = None
@@ -450,6 +457,63 @@ End"
         self.group_timer_label.setText(f"⏳ Templates time left: {mins:02d}:{secs:02d}")
         if ms == 0:
             self.group_timer_label.setText("⏱ Templates time expired — editor is read-only")
+
+    # ---------- HALT TIMER (Global 20-minute exam timer) ----------
+    def start_halt_timer_if_needed(self):
+        """Start the 20-minute global halt timer when exam mode is activated."""
+        if self.halt_timer_started:
+            return
+        self.halt_timer_started = True
+        self.halt_time_left_ms = self.GLOBAL_HALT_TIMER_MS
+        self._update_halt_timer_label()
+        self.group_timer_label.setVisible(True)
+        self.halt_countdown_timer.start(1000)
+        QTimer.singleShot(self.GLOBAL_HALT_TIMER_MS, self.on_halt_time_expired)
+
+    def _tick_halt_timer(self):
+        self.halt_time_left_ms -= 1000
+        if self.halt_time_left_ms <= 0:
+            self.halt_time_left_ms = 0
+            self.halt_countdown_timer.stop()
+        self._update_halt_timer_label()
+
+    def _update_halt_timer_label(self):
+        ms = max(0, self.halt_time_left_ms)
+        seconds = ms // 1000
+        mins = seconds // 60
+        secs = seconds % 60
+        self.group_timer_label.setText(f"⏰ Exam time left: {mins:02d}:{secs:02d}")
+        if ms == 0:
+            self.group_timer_label.setText("🛑 EXAM TIME EXPIRED — HALT MODE ACTIVE")
+
+    def on_halt_time_expired(self):
+        """Called when the 20-minute halt timer expires"""
+        try:
+            self.halt_countdown_timer.stop()
+        except Exception:
+            pass
+        
+        # Enter halt mode - disable everything
+        self.editor.setReadOnly(True)
+        self.run_btn.setEnabled(False)
+        self.stop_btn.setEnabled(False)
+        self.clear_btn.setEnabled(False)
+        self.set_program_actions_enabled(False)
+        self.set_file_actions_enabled(False)
+        
+        # Disable all menu actions
+        for menu_bar_action in self.menu_bar.actions():
+            menu_bar_action.setEnabled(False)
+        
+        self.set_error_banner(True, "🛑 EXAM TIME EXPIRED — HALT MODE ACTIVE. Application is now locked.")
+        self.group_timer_label.setVisible(True)
+        self._update_halt_timer_label()
+        
+        # Output message
+        self.output.appendPlainText("\n🛑 ========== HALT MODE ACTIVATED ==========")
+        self.output.appendPlainText("🛑 20-minute exam period has expired.")
+        self.output.appendPlainText("🛑 Application is now in halt mode — no further operations allowed.")
+        self.output.appendPlainText("🛑 ==========================================\n")
 
     def on_group_time_expired(self):
         try:
@@ -593,6 +657,9 @@ End"
             # Start app switch prevention
             self.app_switch_prevention_timer.start(200)  # Check every 200ms
             
+            # Start the global 20-minute halt timer
+            self.start_halt_timer_if_needed()
+            
             # Disable all menu actions
             for menu_bar_action in self.menu_bar.actions():
                 menu_bar_action.setEnabled(False)
@@ -605,7 +672,7 @@ End"
 
             self.output.appendPlainText("\n🔒 EXAM MODE ACTIVE — APP SWITCHING DISABLED")
             self.output.appendPlainText("🔒 Cannot minimize, close, or switch apps")
-            self.output.appendPlainText("🔒 Press Ctrl+F12 (Admin Key) to exit exam mode\n")
+            self.output.appendPlainText("🔒 20-minute exam timer started (see top-right corner)\n")
             
         except Exception as e:
             print(f"Error activating exam mode: {e}")
@@ -1263,7 +1330,10 @@ End"
     # ⛔ BLOCK CLOSE WHEN IN EXAM MODE
     def closeEvent(self, event):
         if getattr(self, 'exam_lock_active', False):
-            QMessageBox.warning(self, "Exam Mode Active", "Application cannot be closed during exam mode.\n\nPress Ctrl+F12 (Admin Key) to exit exam mode.")
+            if getattr(self, 'halt_timer_started', False) and self.halt_time_left_ms == 0:
+                QMessageBox.warning(self, "Halt Mode", "Application is in HALT MODE and cannot be closed.\n\nExam time has expired.")
+            else:
+                QMessageBox.warning(self, "Exam Mode Active", "Application cannot be closed during exam mode.")
             event.ignore()
         else:
             # Clean up before closing
@@ -1273,13 +1343,16 @@ End"
                 pass
             event.accept()
 
-    # 🔓 ADMIN UNLOCK (Ctrl+F12)
+    # 🔓 ADMIN UNLOCK (Ctrl+F12) - DISABLED
     def keyPressEvent(self, event):
         try:
             if event.key() == Qt.Key_F12 and event.modifiers() == Qt.ControlModifier:
-                # Admin unlock removed: inform user that deactivation is disabled
+                # Admin unlock is permanently disabled in exam mode
                 if self.exam_lock_active:
-                    QMessageBox.information(self, "Locked", "Admin unlock disabled. Exam mode cannot be turned off.")
+                    if self.halt_time_left_ms == 0:
+                        QMessageBox.warning(self, "Halt Mode", "Application is in HALT MODE.\n\nNo unlock available. Exam time has expired.")
+                    else:
+                        QMessageBox.warning(self, "Locked", "Admin unlock is permanently disabled. Exam mode cannot be turned off.")
                 else:
                     QMessageBox.information(self, "Info", "Exam mode is not active.")
                 return
@@ -1325,3 +1398,4 @@ if __name__ == "__main__":
     ide = OfflinePythonIDE()
     ide.show()
     sys.exit(app.exec_())
+
