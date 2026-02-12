@@ -121,19 +121,93 @@ class OfflinePythonIDE(QWidget):
     # Template codes for each program (prog1..prog15)
     PROGRAM_TEMPLATES = {
         "prog1": """# Program 1: Basic Input/Output and Arithmetic Operations
-num1 = int(input("Enter first number: "))
-num2 = int(input("Enter second number: "))
-sum_result = num1 + num2
-difference = num1 - num2
-product = num1 * num2
-print(f"Sum: {sum_result}")
-print(f"Difference: {difference}")
-print(f"Product: {product}")
-if num2 != 0:
-    quotient = num1 / num2
-    print(f"Quotient: {quotient}")
+def add(a, b):
+    return a + b
+
+def divide(a, b):
+    return a / b
+
+values = [10, 20, "30", 40]
+total = 0
+
+for v in values:
+    total = total + v
+
+avg = divide(total, len(values))
+print("Average is " + avg)
+
+if avg> 25
+    print("High")
 else:
-    print("Cannot divide by zero!")
+    print("Low")
+
+count = 3
+while count >= 0:
+print("Count:", count)
+    count = count + 1
+
+def store(data=[]):
+    for i in range(2):
+data.append(i)
+    return data
+
+a = store()
+b = store()
+
+info = {"name": "Sam", "age": 21}
+print(info["grade"])
+
+def calculate():
+    x = 10
+    if x == 10:
+        y = x * 2
+    return y
+
+result = calculate()
+print(result)
+
+numbers = [1, 2, 3]
+print(numbers[5])
+
+def show(msg):
+print("Message: " + msg)
+
+show(100)
+
+final = add(5)
+print(final)
+
+status = True
+if status is "True":
+    print("Active")
+
+for i in range(3):
+    pass
+
+x = 5
+if x > 2:
+print("X is big")
+
+print("Processing done")
+
+print("End")
+
+"""EXPECTED OUTPUT:
+Average is 25.0
+Low
+Count: 3
+Count: 2
+Count: 1
+Count: 0
+A
+20
+3
+Message: 100
+8
+Active
+X is big
+Processing done
+End"""
 """,
     }
 
