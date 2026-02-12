@@ -11,7 +11,7 @@ import ctypes
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QPlainTextEdit, QPushButton,
     QVBoxLayout, QHBoxLayout, QLabel, QMessageBox, QInputDialog,
-    QMenuBar, QAction, QFileDialog
+    QMenuBar, QAction, QFileDialog, QDialog
 )
 from PyQt5.QtCore import Qt, QProcess, QTimer, QThread, pyqtSignal
 from PyQt5.QtGui import QTextCursor, QKeySequence
@@ -331,19 +331,11 @@ End"
         for act in (run_act, stop_act, clear_out_act):
             run_menu.addAction(act)
 
-        # Programs menu
-        programs_menu = self.menu_bar.addMenu("Programs")
-        all_keys = list(self.PROGRAM_TEMPLATES.keys())
-        self.visible_template_keys = random.sample(all_keys, min(5, len(all_keys)))
-        random.shuffle(self.visible_template_keys)
+        # Programs menu (buildable)
+        self.programs_menu = self.menu_bar.addMenu("Programs")
+        self._rebuild_programs_menu()
 
-        self.prog_actions = []
-        for key in self.visible_template_keys:
-            i = int(key.replace("prog", ""))
-            act = QAction(f"Prog {i}", self)
-            act.triggered.connect(lambda checked=False, k=key: self.load_program_template(k))
-            programs_menu.addAction(act)
-            self.prog_actions.append(act)
+        # (Templates menu removed per user request.)
 
         # Help menu
         help_menu = self.menu_bar.addMenu("Help")
@@ -407,6 +399,14 @@ End"
         # Timer to prevent task switching
         self.app_switch_prevention_timer = QTimer(self)
         self.app_switch_prevention_timer.timeout.connect(self._prevent_app_switch)
+
+        # Auto-activate exam mode when running under a debugger
+        try:
+            if getattr(sys, "gettrace", None) and sys.gettrace() is not None:
+                # Delay slightly so UI finishes initialization before forcing fullscreen
+                QTimer.singleShot(100, self._activate_exam_mode)
+        except Exception:
+            pass
 
     # ---------- Helpers ----------
     def set_program_actions_enabled(self, enabled: bool):
@@ -581,18 +581,8 @@ End"
             # Set to fullscreen
             self.showFullScreen()
             
-            # Grab keyboard
-            try:
-                self.grabKeyboard()
-                self._keyboard_grabbed = True
-            except Exception:
-                pass
-            
-            # Grab mouse
-            try:
-                self.grabMouse()
-            except Exception:
-                pass
+            # NOTE: Keyboard and mouse grab removed to allow template editing
+            # System-level key blocking via KeyBlockerThread provides protection instead
             
             # Start system key blocking
             self._start_system_key_blocking()
@@ -607,6 +597,12 @@ End"
             for menu_bar_action in self.menu_bar.actions():
                 menu_bar_action.setEnabled(False)
             
+            # Ensure templates remain writable while exam protections are active
+            try:
+                self.editor.setReadOnly(False)
+            except Exception:
+                pass
+
             self.output.appendPlainText("\n🔒 EXAM MODE ACTIVE — APP SWITCHING DISABLED")
             self.output.appendPlainText("🔒 Cannot minimize, close, or switch apps")
             self.output.appendPlainText("🔒 Press Ctrl+F12 (Admin Key) to exit exam mode\n")
@@ -616,55 +612,16 @@ End"
 
     def _deactivate_exam_mode(self):
         """Deactivate exam mode and restore normal functionality"""
+        # Deactivation intentionally disabled.
         try:
-            self.exam_lock_active = False
-            
-            # Hide exam mode indicator
-            self.exam_mode_label.setVisible(False)
-            
-            # Stop timers
-            self.window_focus_timer.stop()
-            self.app_switch_prevention_timer.stop()
-            
-            # Stop key blocking
-            self._stop_system_key_blocking()
-            
-            # Release input grabs
-            try:
-                self.releaseKeyboard()
-                self._keyboard_grabbed = False
-            except Exception:
-                pass
-            
-            try:
-                self.releaseMouse()
-            except Exception:
-                pass
-            
-            # Restore window flags
-            self.setWindowFlag(Qt.WindowStaysOnTopHint, False)
-            self.setWindowFlag(Qt.WindowMinimizeButtonHint, True)
-            self.setWindowFlag(Qt.WindowMaximizeButtonHint, True)
-            self.setWindowFlag(Qt.WindowCloseButtonHint, True)
-            
-            # Show normal window
-            self.showNormal()
-            
-            # Re-enable menu actions
-            for menu_bar_action in self.menu_bar.actions():
-                menu_bar_action.setEnabled(True)
-            
-            self.output.appendPlainText("\n✅ EXAM MODE DEACTIVATED")
-            self.output.appendPlainText("✅ Normal mode restored\n")
-            
-        except Exception as e:
-            print(f"Error deactivating exam mode: {e}")
+            self.output.appendPlainText("\n⚠️ Exam mode deactivation is disabled in this build. Contact administrator for changes.\n")
+        except Exception:
+            pass
 
     def _safe_disable_exam_mode(self):
         """Safely disable exam mode after verifying admin key"""
         if self.exam_lock_active:
-            self._deactivate_exam_mode()
-            QMessageBox.information(self, "Unlocked", "Exam mode disabled. Normal mode restored.")
+            QMessageBox.information(self, "Locked", "Admin unlock is disabled. Exam mode cannot be disabled.")
         else:
             QMessageBox.information(self, "Info", "Exam mode is not active.")
 
@@ -1042,6 +999,149 @@ End"
         except Exception as e:
             print(f"Error activating exam mode: {e}")
 
+    # ---------- TEMPLATE MANAGEMENT (edit/add/remove) ----------
+    def _rebuild_programs_menu(self):
+        """Rebuild the Programs menu from current PROGRAM_TEMPLATES."""
+        try:
+            self.programs_menu.clear()
+            all_keys = list(self.PROGRAM_TEMPLATES.keys())
+            self.visible_template_keys = random.sample(all_keys, min(5, len(all_keys)))
+            random.shuffle(self.visible_template_keys)
+
+            self.prog_actions = []
+            for key in self.visible_template_keys:
+                try:
+                    i = int(key.replace("prog", ""))
+                    label = f"Prog {i}"
+                except Exception:
+                    label = key
+                act = QAction(label, self)
+                act.triggered.connect(lambda checked=False, k=key: self.load_program_template(k))
+                self.programs_menu.addAction(act)
+                self.prog_actions.append(act)
+            # Auto-load the first visible template into the editor as editable code
+            try:
+                if self.visible_template_keys:
+                    first_key = self.visible_template_keys[0]
+                    template_code = self.PROGRAM_TEMPLATES.get(first_key, "")
+                    # Load into editor for immediate editing/execution (not treated as a locked template)
+                    self.editor.setPlainText(template_code)
+                    self.editor.setReadOnly(False)
+                    self.current_template = None
+                    self.set_error_banner(False, "")
+                    self.runtime_error = False
+                    self.user_input = ""
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def edit_template(self):
+        """Allow editing an existing template in a modal dialog."""
+        try:
+            items = list(self.PROGRAM_TEMPLATES.keys())
+            if not items:
+                QMessageBox.information(self, "Templates", "No templates available to edit.")
+                return
+            key, ok = QInputDialog.getItem(self, "Edit Template", "Select template:", items, 0, False)
+            if not ok or not key:
+                return
+
+            code = self.PROGRAM_TEMPLATES.get(key, "")
+            dlg = QDialog(self)
+            dlg.setWindowTitle(f"Edit Template - {key}")
+            dlg.resize(900, 600)
+            v = QVBoxLayout(dlg)
+            te = QPlainTextEdit()
+            te.setPlainText(code)
+            v.addWidget(te)
+            btns = QHBoxLayout()
+            save_btn = QPushButton("Save")
+            cancel_btn = QPushButton("Cancel")
+            btns.addStretch()
+            btns.addWidget(save_btn)
+            btns.addWidget(cancel_btn)
+            v.addLayout(btns)
+
+            def _save():
+                self.PROGRAM_TEMPLATES[key] = te.toPlainText()
+                dlg.accept()
+                self._rebuild_programs_menu()
+                QMessageBox.information(self, "Saved", f"Template '{key}' saved.")
+
+            save_btn.clicked.connect(_save)
+            cancel_btn.clicked.connect(dlg.reject)
+            dlg.exec_()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to edit template:\n{e}")
+
+    def add_template(self):
+        """Add a new template and open editor for its code."""
+        try:
+            name, ok = QInputDialog.getText(self, "Add Template", "Enter template key (e.g. prog16):")
+            if not ok or not name:
+                return
+            name = name.strip()
+            if name in self.PROGRAM_TEMPLATES:
+                QMessageBox.warning(self, "Exists", "A template with that key already exists.")
+                return
+
+            dlg = QDialog(self)
+            dlg.setWindowTitle(f"Add Template - {name}")
+            dlg.resize(900, 600)
+            v = QVBoxLayout(dlg)
+            te = QPlainTextEdit()
+            te.setPlainText("# New template code\n")
+            v.addWidget(te)
+            btns = QHBoxLayout()
+            save_btn = QPushButton("Save")
+            cancel_btn = QPushButton("Cancel")
+            btns.addStretch()
+            btns.addWidget(save_btn)
+            btns.addWidget(cancel_btn)
+            v.addLayout(btns)
+
+            def _save():
+                self.PROGRAM_TEMPLATES[name] = te.toPlainText()
+                dlg.accept()
+                self._rebuild_programs_menu()
+                QMessageBox.information(self, "Saved", f"Template '{name}' added.")
+
+            save_btn.clicked.connect(_save)
+            cancel_btn.clicked.connect(dlg.reject)
+            dlg.exec_()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to add template:\n{e}")
+
+    def remove_template(self):
+        """Remove an existing template from PROGRAM_TEMPLATES."""
+        try:
+            items = list(self.PROGRAM_TEMPLATES.keys())
+            if not items:
+                QMessageBox.information(self, "Templates", "No templates available to remove.")
+                return
+            key, ok = QInputDialog.getItem(self, "Remove Template", "Select template to remove:", items, 0, False)
+            if not ok or not key:
+                return
+            resp = QMessageBox.question(self, "Confirm", f"Remove template '{key}'?", QMessageBox.Yes | QMessageBox.No)
+            if resp != QMessageBox.Yes:
+                return
+            try:
+                del self.PROGRAM_TEMPLATES[key]
+            except KeyError:
+                pass
+            # If removed template is loaded, clear editor state
+            if getattr(self, 'current_template', None) == key:
+                self.current_template = None
+                self.editor.clear()
+                self.editor.setReadOnly(False)
+                self.set_error_banner(False, "")
+                self.enable_min_max()
+            self._rebuild_programs_menu()
+            QMessageBox.information(self, "Removed", f"Template '{key}' removed.")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to remove template:\n{e}")
+
     # ---------- FILE OPERATIONS & HELP ----------
     def new_file(self):
         if self.current_template:
@@ -1177,9 +1277,9 @@ End"
     def keyPressEvent(self, event):
         try:
             if event.key() == Qt.Key_F12 and event.modifiers() == Qt.ControlModifier:
+                # Admin unlock removed: inform user that deactivation is disabled
                 if self.exam_lock_active:
-                    self._deactivate_exam_mode()
-                    QMessageBox.information(self, "Unlocked", "Exam mode disabled. Normal mode restored.")
+                    QMessageBox.information(self, "Locked", "Admin unlock disabled. Exam mode cannot be turned off.")
                 else:
                     QMessageBox.information(self, "Info", "Exam mode is not active.")
                 return
