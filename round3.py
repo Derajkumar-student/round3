@@ -192,7 +192,7 @@ print("Processing done")
 
 print("End")
 
-"""EXPECTED OUTPUT:
+"EXPECTED OUTPUT:
 Average is 25.0
 Low
 Count: 3
@@ -207,7 +207,7 @@ Message: 100
 Active
 X is big
 Processing done
-End"""
+End"
 """,
     }
 
